@@ -561,10 +561,16 @@ TASKS TO COMPLETE:
 
    A. Function load_videos(video_files):
       - Create cv2.VideoCapture for each video
-      - Return dict: camera_id -> VideoCapture
-      - Also return metadata dict with fps, frame_count, resolution per camera
-      - Print info for each loaded video
-      - Raise error if video cannot be opened
+      - Return TWO values:
+        * captures: dict mapping camera_id -> VideoCapture
+        * metadata: dict with structure:
+          {
+              'fps': [fps_cam0, fps_cam1, ...],
+              'frame_counts': [count_cam0, count_cam1, ...],
+              'resolutions': [(w0,h0), (w1,h1), ...]
+          }
+      - Print info for each loaded video (resolution, fps, frame count)
+      - Raise ValueError if video cannot be opened
 
    B. Function read_synchronized_frames(captures):
       - Read one frame from each active camera
@@ -575,21 +581,31 @@ TASKS TO COMPLETE:
    C. Function main():
       - Print banner: "=== 2D Event Map System ==="
       - Phase 1: Load videos using load_videos()
+        * Store both captures and metadata: captures, metadata = load_videos(VIDEO_FILES)
       - Phase 2: Run calibration using calibrate_cameras()
+        * Wrap in try-except to catch RuntimeError if user cancels
+        * If cancelled: print message and exit cleanly
       - Reset video captures to frame 0
+        * Use: cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
       - Phase 3: Initialize PersonDetector
       - Phase 4: Initialize CoordinateTransformer with calibration data
       - Phase 5: Initialize MapVisualizer
       - Get grid dimensions using calculate_grid_dimensions()
       - Main processing loop:
+        * Initialize frame_count = 0 before loop
+        * Initialize paused = False
         * Read synchronized frames
         * Check if all finished -> break
-        * Detect persons in all frames (create detections_per_camera dict)
+        * Detect persons in all frames:
+          - Create detections_per_camera dict
+          - Wrap detection in try-except for each camera
+          - On detection error: print warning, use empty list, continue
         * Transform detections to canvas coordinates
         * Render and display 2D map with detections
         * Handle keyboard input:
           - 'q': quit
-          - 'p': pause (wait for SPACE to resume)
+          - 'p': pause (set paused=True, loop with cv2.waitKey(10) until SPACE)
+        * Increment frame_count
         * Print progress every 30 frames (frame count, active cameras, total detections)
       - Cleanup: release all captures, close visualizer, destroy windows
       - Print "Done"
@@ -604,10 +620,14 @@ TASKS TO COMPLETE:
 
 IMPLEMENTATION NOTES:
 - Import all modules: config, utils, calibration, detector, transformer, visualizer
+- Import cv2 for video handling and window cleanup
+- Import sys for exit codes
 - Use descriptive print statements for user feedback
 - Progress format: "Frame 30: 2 cameras active, 3 persons detected"
 - Pause logic: set paused=True, loop with cv2.waitKey(10) until SPACE pressed
 - Grid dimensions needed for visualizer.render_frame(show_grid=True)
+- Detection error handling: try-except around detector.detect_persons(), print warning, continue with empty list
+- Calibration cancellation: catch RuntimeError from calibrate_cameras(), print clean message, exit
 
 EXPECTED WORKFLOW:
 1. User runs: python main.py
@@ -650,40 +670,87 @@ Add robust error handling, input validation, and graceful failure recovery.
 TASKS TO COMPLETE:
 
 1. Enhance utils.py with validation functions:
-   - validate_point_count(points, expected=4): Raise error if wrong count
-   - validate_points_not_collinear(points): Check points form valid quadrilateral using cv2.contourArea()
-   - validate_homography_matrix(matrix): Check not None and not singular (determinant check)
-   - Enhance validate_video_files(): Check files exist AND can be opened
+   - Import os for file existence checks
+   - Import numpy as np for linalg operations
+   
+   - validate_point_count(points, expected=4):
+     * Raise ValueError if len(points) != expected
+     * Message: "Expected {expected} points, got {len(points)}"
+   
+   - validate_points_not_collinear(points):
+     * Convert points to numpy array: np.array(points, dtype=np.float32)
+     * Use cv2.contourArea() to compute area
+     * If area < 100: raise ValueError("Points are too close or collinear")
+     * Note: 100 is pixel area threshold for valid quadrilateral
+   
+   - validate_homography_matrix(matrix):
+     * Check if matrix is None: raise ValueError("Homography computation failed")
+     * Compute determinant: det = np.linalg.det(matrix)
+     * If abs(det) < 1e-6: raise ValueError(f"Homography matrix is singular (det={det})")
+   
+   - Enhance validate_video_files(video_paths):
+     * Check if not video_paths: raise ValueError("No video files specified")
+     * For each path:
+       - Check os.path.exists(path), raise FileNotFoundError if not found
+       - Try cv2.VideoCapture(path), check isOpened(), raise ValueError if cannot open
+       - Release capture after check
+     * Return True if all valid
 
 2. Add error handling to calibration.py:
+   - Import from utils: validate_point_count, validate_points_not_collinear, validate_homography_matrix
+   
    - In PointSelector.select_points():
-     * Validate 4 points collected
-     * Call validate_points_not_collinear()
-     * Handle window close (user cancels) -> return None
-     * Wrap in try-except, raise RuntimeError with camera ID on failure
+     * After user confirms, call validate_point_count(self.points, 4)
+     * Call validate_points_not_collinear(self.points)
+     * If validation fails: print error, allow user to reset and retry
+     * Handle window close (check cv2.getWindowProperty, if < 0, user closed)
+     * On cancel/close: raise RuntimeError(f"User cancelled calibration at camera {self.camera_id}")
    
    - In compute_homography():
-     * Call validate_homography_matrix()
-     * Wrap in try-except, raise RuntimeError on failure
+     * Wrap cv2.getPerspectiveTransform() in try-except
+     * After computation, call validate_homography_matrix(H)
+     * On any error: raise RuntimeError(f"Homography computation failed: {error_message}")
    
    - In calibrate_cameras():
-     * Check if point selection returned None (user cancelled) -> raise error
-     * Add try-except for each camera calibration step
+     * Wrap point selection in try-except
+     * If RuntimeError raised: re-raise with camera context
+     * Wrap homography computation in try-except
+     * If RuntimeError raised: re-raise with camera context
 
 3. Add error handling to detector.py:
    - In PersonDetector.__init__():
-     * Wrap model loading in try-except
-     * Raise RuntimeError if model fails to load
+     * Wrap YOLO model loading in try-except
+     * On exception: raise RuntimeError(f"Failed to load YOLO model {model_name}: {error}")
+     * This should crash during initialization (fail fast)
    
    - In detect_persons():
-     * Wrap inference in try-except
-     * On error: print warning and return empty list (don't crash)
+     * Wrap self.model(frame, verbose=False) in try-except
+     * On exception: 
+       - Print: f"Warning: Detection failed on frame: {error}"
+       - Return empty list [] (don't crash, continue processing)
+     * Rationale: One bad frame shouldn't stop entire pipeline
 
 4. Add error handling to main.py:
-   - Before calibration: call validate_video_files(VIDEO_FILES)
-   - Handle calibration failure (print clear message and exit)
-   - Handle detection errors gracefully (skip frame, continue)
-   - Improve KeyboardInterrupt handler (print clean message)
+   - Import sys for exit codes
+   - Before calibration: 
+     * Wrap validate_video_files(VIDEO_FILES) in try-except
+     * On FileNotFoundError or ValueError: print error, call sys.exit(1)
+   
+   - Handle calibration failure:
+     * Wrap calibrate_cameras() in try-except
+     * Catch RuntimeError (user cancellation)
+     * Print: "Calibration cancelled by user" or error message
+     * Call sys.exit(0) for user cancel, sys.exit(1) for errors
+   
+   - Handle detection errors in main loop:
+     * Already handled in detect_persons() (returns empty list)
+     * No additional handling needed in main loop
+   
+   - Improve KeyboardInterrupt handler:
+     * Catch KeyboardInterrupt in main if __name__ == "__main__" block
+     * Print: "\n\nInterrupted by user"
+     * Call cv2.destroyAllWindows()
+     * No sys.exit() needed (natural exit)
 
 5. Create tests/test_errors.py that tests:
    - Invalid video path -> expect clear error
@@ -694,10 +761,20 @@ TASKS TO COMPLETE:
 
 IMPLEMENTATION NOTES:
 - Error messages should be clear and actionable
-- Validation should happen early (fail fast)
-- Detection errors should not crash entire system
-- Always cleanup resources on any exit path
-- Use specific exception types (ValueError, FileNotFoundError, RuntimeError)
+- Validation should happen early (fail fast principle)
+- Detection errors should not crash entire system (return empty list, continue)
+- Always cleanup resources on any exit path (try-finally or context managers)
+- Use specific exception types:
+  * FileNotFoundError: video files not found
+  * ValueError: invalid inputs, wrong counts, bad video format
+  * RuntimeError: operation failures (model load, calibration, homography)
+- Thresholds:
+  * Collinear points: area < 100 pixels²
+  * Singular matrix: abs(determinant) < 1e-6
+- Exit codes:
+  * sys.exit(0): user cancellation (normal)
+  * sys.exit(1): errors (abnormal)
+- Import requirements: os, sys, numpy for validation functions
 
 EXPECTED IMPROVEMENTS:
 - Clear error messages guide user to fix issues
