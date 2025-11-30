@@ -13,8 +13,8 @@ import sys
 import traceback
 from typing import Dict, Tuple, List
 
-from config import VIDEO_FILES
-from utils import calculate_grid_dimensions
+from config import VIDEO_FILES, CANVAS_WIDTH, CANVAS_HEIGHT
+from utils import calculate_grid_dimensions, validate_video_files
 from calibration import calibrate_cameras
 from detector import PersonDetector
 from transformer import CoordinateTransformer
@@ -104,6 +104,16 @@ def main():
     print("=== 2D Event Map System ===")
     
     try:
+        # Validate video files first
+        print("\n[PRE-CHECK] Validating video files...")
+        try:
+            validate_video_files(VIDEO_FILES)
+            print("✓ All video files validated")
+        except (FileNotFoundError, ValueError) as e:
+            print(f"\nError: {e}")
+            print("Please check your video file paths in config.py")
+            sys.exit(1)
+        
         # Phase 1: Load videos
         print("\n[PHASE 1] Loading videos...")
         captures, metadata = load_videos(VIDEO_FILES)
@@ -118,16 +128,22 @@ def main():
         print("  - Close window to cancel calibration")
         
         try:
-            calibration_data = calibrate_cameras(captures)
+            calibration_data = calibrate_cameras(VIDEO_FILES, CANVAS_WIDTH, CANVAS_HEIGHT)
+            print("✓ Calibration complete!")
         except RuntimeError as e:
-            print(f"\nCalibration cancelled: {e}")
-            print("Exiting...")
-            for cap in captures.values():
-                cap.release()
-            cv2.destroyAllWindows()
-            sys.exit(0)
-        
-        print("Calibration complete!")
+            error_msg = str(e)
+            if "cancelled" in error_msg.lower():
+                print(f"\nCalibration cancelled by user")
+                for cap in captures.values():
+                    cap.release()
+                cv2.destroyAllWindows()
+                sys.exit(0)
+            else:
+                print(f"\nCalibration error: {e}")
+                for cap in captures.values():
+                    cap.release()
+                cv2.destroyAllWindows()
+                sys.exit(1)
         
         # Reset video captures to frame 0
         print("\n[PHASE 3] Resetting videos to start...")
@@ -144,7 +160,7 @@ def main():
         
         # Phase 5: Initialize MapVisualizer
         print("\n[PHASE 6] Initializing map visualizer...")
-        visualizer = MapVisualizer()
+        visualizer = MapVisualizer(CANVAS_WIDTH, CANVAS_HEIGHT)
         
         # Get grid dimensions
         grid_width, grid_height = calculate_grid_dimensions(len(captures))
@@ -195,11 +211,10 @@ def main():
             
             # Render and display 2D map
             map_frame = visualizer.render_frame(
-                frames_dict, 
-                canvas_detections, 
-                grid_width, 
-                grid_height,
-                show_grid=True
+                canvas_detections,
+                show_grid=True,
+                grid_rows=grid_width,
+                grid_cols=grid_height
             )
             
             cv2.imshow("2D Event Map", map_frame)
@@ -230,15 +245,13 @@ def main():
         print("Done!")
         
     except KeyboardInterrupt:
-        print("\n\nInterrupted by user (Ctrl+C)")
-        print("Cleaning up...")
+        print("\n\nInterrupted by user")
         if 'captures' in locals():
             for cap in captures.values():
                 cap.release()
         if 'visualizer' in locals():
             visualizer.close()
         cv2.destroyAllWindows()
-        sys.exit(1)
         
     except Exception as e:
         print(f"\n\nError occurred: {e}")

@@ -99,7 +99,7 @@ class PersonDetector:
             return detections
             
         except Exception as e:
-            print(f"[PersonDetector] Error during detection: {e}")
+            print(f"Warning: Detection failed on frame: {e}")
             return []
     
     def detect_persons_batch(self, frames: Union[List[np.ndarray], Dict[str, np.ndarray]]) -> Union[List[List[Dict]], Dict[str, List[Dict]]]:

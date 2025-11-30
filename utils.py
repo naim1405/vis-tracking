@@ -6,12 +6,14 @@ the application.
 """
 
 import os
+import sys
 import cv2
 import math
+import numpy as np
 from typing import List, Tuple
 
 
-def validate_video_files(video_paths: List[str]) -> Tuple[bool, List[str]]:
+def validate_video_files(video_paths: List[str]) -> bool:
     """
     Check if video files exist and can be opened by OpenCV.
     
@@ -19,37 +21,34 @@ def validate_video_files(video_paths: List[str]) -> Tuple[bool, List[str]]:
         video_paths: List of video file paths to validate
         
     Returns:
-        Tuple of (all_valid, error_messages) where:
-        - all_valid: True if all videos are valid, False otherwise
-        - error_messages: List of error messages for invalid videos
+        True if all videos are valid
+        
+    Raises:
+        ValueError: If no video files specified
+        FileNotFoundError: If any video file does not exist
+        ValueError: If any video file cannot be opened or read
     """
-    error_messages = []
-    
     if not video_paths:
-        error_messages.append("No video paths provided")
-        return False, error_messages
+        raise ValueError("No video files specified")
     
     for path in video_paths:
         # Check if file exists
         if not os.path.exists(path):
-            error_messages.append(f"File does not exist: {path}")
-            continue
+            raise FileNotFoundError(f"Video file not found: {path}")
         
         # Try to open with OpenCV
-        try:
-            cap = cv2.VideoCapture(path)
-            if not cap.isOpened():
-                error_messages.append(f"Cannot open video file: {path}")
-            else:
-                # Try to read one frame to ensure it's a valid video
-                ret, _ = cap.read()
-                if not ret:
-                    error_messages.append(f"Cannot read frames from video: {path}")
-            cap.release()
-        except Exception as e:
-            error_messages.append(f"Error opening {path}: {str(e)}")
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video file: {path}")
+        
+        # Try to read one frame to ensure it's a valid video
+        ret, _ = cap.read()
+        cap.release()
+        
+        if not ret:
+            raise ValueError(f"Cannot read frames from video: {path}")
     
-    return len(error_messages) == 0, error_messages
+    return True
 
 
 def calculate_grid_dimensions(num_cameras: int) -> Tuple[int, int]:
@@ -89,50 +88,58 @@ def calculate_grid_dimensions(num_cameras: int) -> Tuple[int, int]:
     return rows, cols
 
 
-def validate_calibration_points(points: List[Tuple[float, float]]) -> Tuple[bool, str]:
+def validate_point_count(points: List[Tuple[float, float]], expected: int = 4) -> None:
     """
-    Validate that calibration points form a valid quadrilateral.
+    Validate that we have the expected number of points.
     
-    A valid quadrilateral requires:
-    - Exactly 4 points
-    - All points have valid numeric coordinates
-    - Points are not collinear
-    - Points form a non-degenerate quadrilateral (non-zero area)
+    Args:
+        points: List of (x, y) coordinate tuples
+        expected: Expected number of points (default: 4)
+        
+    Raises:
+        ValueError: If point count doesn't match expected
+    """
+    if len(points) != expected:
+        raise ValueError(f"Expected {expected} points, got {len(points)}")
+
+
+def validate_points_not_collinear(points: List[Tuple[float, float]]) -> None:
+    """
+    Validate that points are not collinear and form a valid quadrilateral.
     
     Args:
         points: List of (x, y) coordinate tuples
         
-    Returns:
-        Tuple of (is_valid, error_message) where:
-        - is_valid: True if points form valid quadrilateral, False otherwise
-        - error_message: Description of validation error, empty string if valid
+    Raises:
+        ValueError: If points are too close together or collinear
     """
-    # Check if we have exactly 4 points
-    if len(points) != 4:
-        return False, f"Expected 4 points, got {len(points)}"
+    # Convert points to numpy array
+    points_array = np.array(points, dtype=np.float32)
     
-    # Validate each point
-    for i, point in enumerate(points):
-        if not isinstance(point, (tuple, list)) or len(point) != 2:
-            return False, f"Point {i} is not a valid (x, y) tuple"
+    # Use cv2.contourArea to compute area
+    area = cv2.contourArea(points_array)
+    
+    # Area threshold of 100 pixels² for valid quadrilateral
+    if area < 100:
+        raise ValueError("Points are too close or collinear (area < 100 pixels²)")
+
+
+def validate_homography_matrix(matrix: np.ndarray) -> None:
+    """
+    Validate that homography matrix is valid and not singular.
+    
+    Args:
+        matrix: 3x3 homography matrix
         
-        try:
-            x, y = float(point[0]), float(point[1])
-            if not (math.isfinite(x) and math.isfinite(y)):
-                return False, f"Point {i} contains invalid numeric values"
-        except (TypeError, ValueError):
-            return False, f"Point {i} contains non-numeric values"
+    Raises:
+        ValueError: If matrix is None or singular
+    """
+    if matrix is None:
+        raise ValueError("Homography computation failed")
     
-    # Calculate area using the Shoelace formula
-    # This helps detect degenerate cases (collinear points, zero area)
-    area = 0.0
-    for i in range(4):
-        j = (i + 1) % 4
-        area += points[i][0] * points[j][1]
-        area -= points[j][0] * points[i][1]
-    area = abs(area) / 2.0
+    # Compute determinant
+    det = np.linalg.det(matrix)
     
-    if area < 1e-6:  # Essentially zero area
-        return False, "Points are collinear or form a degenerate quadrilateral"
-    
-    return True, ""
+    # Check if matrix is singular (determinant near zero)
+    if abs(det) < 1e-6:
+        raise ValueError(f"Homography matrix is singular (det={det:.2e})")

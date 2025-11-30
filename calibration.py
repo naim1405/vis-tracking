@@ -10,6 +10,7 @@ transformations.
 import cv2
 import numpy as np
 import math
+from utils import validate_point_count, validate_points_not_collinear, validate_homography_matrix
 
 
 class GridArrangementUI:
@@ -339,6 +340,10 @@ class PointSelector:
         cv2.setMouseCallback(self.window_name, self._mouse_callback)
         
         while True:
+            # Check if window was closed by user
+            if cv2.getWindowProperty(self.window_name, cv2.WND_PROP_VISIBLE) < 1:
+                raise RuntimeError(f"User cancelled calibration at camera {self.camera_id}")
+            
             self._draw_points()
             cv2.imshow(self.window_name, self.display_frame)
             
@@ -352,13 +357,15 @@ class PointSelector:
             elif key == ord('c'):
                 # Confirm selection
                 if len(self.points) == 4:
-                    # Validate points form valid quadrilateral
-                    if self._validate_points():
+                    # Validate points
+                    try:
+                        validate_point_count(self.points, 4)
+                        validate_points_not_collinear(self.points)
                         print(f"  ✓ 4 points confirmed for camera {self.camera_id}")
                         cv2.destroyWindow(self.window_name)
                         return self.points
-                    else:
-                        print("  Error: Points are invalid (too close or collinear)")
+                    except ValueError as e:
+                        print(f"  Error: {e}")
                         print("  Press 'r' to reset and try again")
                 else:
                     print(f"  Error: Need exactly 4 points (have {len(self.points)})")
@@ -367,24 +374,6 @@ class PointSelector:
                 # Quit
                 cv2.destroyWindow(self.window_name)
                 raise RuntimeError(f"User cancelled calibration at camera {self.camera_id}")
-        
-    def _validate_points(self):
-        """
-        Validate that points form a valid quadrilateral.
-        
-        Returns:
-            bool: True if points are valid
-        """
-        if len(self.points) != 4:
-            return False
-        
-        # Check area is not too small (points not collinear/too close)
-        points_array = np.array(self.points, dtype=np.float32)
-        area = cv2.contourArea(points_array)
-        
-        # Area threshold (adjust based on expected frame size)
-        min_area = 100
-        return area > min_area
 
 
 def calculate_grid_dimensions(num_cameras):
@@ -422,18 +411,18 @@ def compute_homography(source_points, destination_points):
     src_pts = np.array(source_points, dtype=np.float32)
     dst_pts = np.array(destination_points, dtype=np.float32)
     
-    # Compute perspective transform
-    H = cv2.getPerspectiveTransform(src_pts, dst_pts)
-    
-    if H is None:
-        raise RuntimeError("Failed to compute homography matrix")
-    
-    # Validate matrix is not singular
-    det = np.linalg.det(H)
-    if abs(det) < 1e-6:
-        raise RuntimeError(f"Homography matrix is singular (det={det})")
-    
-    return H
+    try:
+        # Compute perspective transform
+        H = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        
+        # Validate matrix
+        validate_homography_matrix(H)
+        
+        return H
+    except ValueError as e:
+        raise RuntimeError(f"Homography computation failed: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Homography computation failed: {e}")
 
 
 def calibrate_cameras(video_files, canvas_width, canvas_height):
@@ -507,8 +496,9 @@ def calibrate_cameras(video_files, canvas_width, canvas_height):
         try:
             source_points = selector.select_points()
             camera_source_points[camera_id] = source_points
-        except Exception as e:
-            raise RuntimeError(f"Point selection failed for camera {camera_id}: {e}")
+        except RuntimeError as e:
+            # Re-raise with camera context
+            raise RuntimeError(f"Camera {camera_id} point selection failed: {e}")
     
     # Phase 2: Interactive grid arrangement
     print("\n" + "="*60)
@@ -553,8 +543,9 @@ def calibrate_cameras(video_files, canvas_width, canvas_height):
         # Compute homography
         try:
             homography_matrix = compute_homography(source_points, destination_points)
-        except Exception as e:
-            raise RuntimeError(f"Homography computation failed for camera {camera_id}: {e}")
+        except RuntimeError as e:
+            # Re-raise with camera context
+            raise RuntimeError(f"Camera {camera_id} homography computation failed: {e}")
         
         # Store calibration data
         camera_data = {
