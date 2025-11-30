@@ -18,7 +18,8 @@ from calibration import (
     PointSelector, 
     calculate_grid_dimensions, 
     compute_homography,
-    calibrate_cameras
+    calibrate_cameras,
+    GridArrangementUI
 )
 from config import VIDEO_FILES, CANVAS_WIDTH, CANVAS_HEIGHT
 
@@ -316,7 +317,9 @@ def test_full_calibration():
         return None
     
     print(f"Testing with {len(VIDEO_FILES)} cameras")
-    print("This will require you to select points for each camera.")
+    print("This will require you to:")
+    print("  1. Select points for each camera")
+    print("  2. Confirm or customize grid arrangement")
     
     response = input("\nProceed with full calibration test? (y/n): ")
     if response.lower() != 'y':
@@ -389,6 +392,132 @@ def test_full_calibration():
         return False
 
 
+def test_grid_arrangement_ui():
+    """
+    Test GridArrangementUI with mock camera frames.
+    This is a manual test requiring user interaction.
+    """
+    print("\n=== Test 6: Grid Arrangement UI (Manual) ===")
+    
+    # Check if test video exists
+    if not VIDEO_FILES or not os.path.exists(VIDEO_FILES[0]):
+        print("✗ No test video available")
+        print("  Skipping grid arrangement UI test")
+        return None
+    
+    print("This test will display the grid arrangement UI.")
+    response = input("Proceed with grid arrangement test? (y/n): ")
+    if response.lower() != 'y':
+        print("  Test skipped by user")
+        return None
+    
+    try:
+        # Load test frames
+        num_test_cameras = min(3, len(VIDEO_FILES))  # Use up to 3 cameras
+        camera_frames = {}
+        
+        for i in range(num_test_cameras):
+            if i < len(VIDEO_FILES) and os.path.exists(VIDEO_FILES[i]):
+                cap = cv2.VideoCapture(VIDEO_FILES[i])
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    camera_frames[i] = frame
+            else:
+                # Create dummy frame if video not available
+                camera_frames[i] = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+        
+        print(f"✓ Loaded {len(camera_frames)} camera frames")
+        
+        # Create GridArrangementUI
+        arrangement_ui = GridArrangementUI(
+            num_test_cameras,
+            camera_frames,
+            CANVAS_WIDTH,
+            CANVAS_HEIGHT
+        )
+        
+        print("Testing grid arrangement UI...")
+        print("Instructions:")
+        print("  - Press 'c' to confirm default arrangement")
+        print("  - Press 'e' to edit (then enter custom positions)")
+        print("  - Press 'r' to reset to default")
+        
+        # Run arrangement UI
+        camera_positions = arrangement_ui.arrange_cameras_simple()
+        
+        print("\n✓ Grid arrangement completed")
+        print("Final camera positions:")
+        for camera_id in sorted(camera_positions.keys()):
+            row, col = camera_positions[camera_id]
+            print(f"  Camera {camera_id} -> Grid cell ({row}, {col})")
+        
+        # Validate results
+        if len(camera_positions) != num_test_cameras:
+            print(f"✗ Wrong number of camera positions: {len(camera_positions)} (expected {num_test_cameras})")
+            return False
+        
+        # Check no duplicate positions
+        position_set = set(camera_positions.values())
+        if len(position_set) != len(camera_positions):
+            print(f"✗ Duplicate grid positions detected")
+            return False
+        
+        print("✓ All positions valid (no duplicates)")
+        return True
+        
+    except Exception as e:
+        print(f"✗ Grid arrangement UI test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def test_arrangement_input_parsing():
+    """Test input parsing for grid arrangement."""
+    print("\n=== Test 7: Arrangement Input Parsing ===")
+    
+    # Create dummy frames
+    camera_frames = {
+        0: np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8),
+        1: np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8),
+        2: np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8),
+    }
+    
+    arrangement_ui = GridArrangementUI(3, camera_frames, 1200, 1200)
+    
+    # Test valid inputs
+    test_cases = [
+        ("0:0,0 1:0,1 2:1,0", True, "Valid arrangement"),
+        ("0:0,1 1:0,0 2:1,1", True, "Valid arrangement (swapped)"),
+        ("0:0,0 1:0,0 2:1,0", False, "Duplicate positions"),
+        ("0:0,0 1:0,1", False, "Missing camera"),
+        ("0:0,0 1:0,1 2:5,0", False, "Invalid row"),
+        ("0:0,0 1:0,5 2:1,0", False, "Invalid col"),
+        ("invalid", False, "Invalid format"),
+    ]
+    
+    all_passed = True
+    
+    for input_str, should_succeed, description in test_cases:
+        result = arrangement_ui._parse_arrangement_input(input_str)
+        success = result is not None
+        
+        if success == should_succeed:
+            status = "✓"
+        else:
+            status = "✗"
+            all_passed = False
+        
+        expected = "should succeed" if should_succeed else "should fail"
+        print(f"{status} {description}: {expected}")
+        if result is not None:
+            print(f"    Parsed: {result}")
+    
+    print(f"\n{'✓ PASSED' if all_passed else '✗ FAILED'}: Arrangement input parsing test")
+    return all_passed
+
+
 def main():
     """Run all calibration tests."""
     print("=" * 60)
@@ -401,6 +530,7 @@ def main():
     results['grid_dimensions'] = test_grid_dimensions()
     results['homography_computation'] = test_homography_computation()
     results['homography_transformation'] = test_homography_transformation()
+    results['arrangement_input_parsing'] = test_arrangement_input_parsing()
     
     # Manual tests (optional)
     print("\n" + "=" * 60)
@@ -412,6 +542,13 @@ def main():
         results['point_selector'] = test_point_selector_manual()
     else:
         results['point_selector'] = None
+        print("  Test skipped")
+    
+    response = input("\nRun grid arrangement UI test? (y/n): ")
+    if response.lower() == 'y':
+        results['grid_arrangement_ui'] = test_grid_arrangement_ui()
+    else:
+        results['grid_arrangement_ui'] = None
         print("  Test skipped")
     
     results['full_calibration'] = test_full_calibration()
