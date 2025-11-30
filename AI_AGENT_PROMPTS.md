@@ -169,6 +169,120 @@ Please implement Phase 2 now.
 
 ---
 
+## PHASE 2B PROMPT: Interactive Grid Arrangement UI
+
+```
+I'm continuing the multi-camera person tracking system. This is PHASE 2B - an enhancement to the calibration module.
+
+PROJECT CONTEXT:
+- Working directory: /home/ezio/Documents/work/vis-tracking
+- Phase 2 completed: calibration.py works with auto-arrangement
+- Currently: cameras are auto-arranged in grid (camera 0->cell 0,0, camera 1->cell 0,1, etc.)
+- Enhancement needed: Interactive UI where user can see and rearrange camera coverage areas
+- Reference: IMPLEMENTATION_PLAN.md sections on "Grid-Based Camera Layout"
+
+PHASE 2B OBJECTIVES:
+Add interactive grid arrangement UI so users can visually position cameras to match actual room layout.
+
+CURRENT BEHAVIOR:
+- calibrate_cameras() auto-arranges cameras in row-major order
+- Works but doesn't let user customize spatial arrangement
+
+DESIRED BEHAVIOR:
+After point selection, show a canvas where user can:
+1. See all camera coverage areas as labeled rectangles
+2. Drag/rearrange them to match actual room layout
+3. Confirm arrangement before computing homographies
+
+TASKS TO COMPLETE:
+
+1. Add new class to calibration.py:
+
+   Class GridArrangementUI:
+      - __init__(self, num_cameras, camera_frames, canvas_width, canvas_height):
+        * Store camera count, canvas dimensions
+        * Store thumbnail of each camera's first frame
+        * Initialize with default grid positions
+        
+      - arrange_cameras(self):
+        * Display canvas with current grid layout
+        * Show each camera as labeled rectangle with thumbnail
+        * Show camera ID labels (Camera 0, Camera 1, etc.)
+        * Allow drag-and-drop to swap camera positions
+        * OR allow keyboard input to reassign positions
+        * Keys: arrow keys to select camera, WASD to move, 'c' to confirm, 'r' to reset
+        * Return: dict mapping camera_id -> (grid_row, grid_col)
+
+   Alternative Simpler Approach (RECOMMENDED):
+      - arrange_cameras_simple(self):
+        * Display canvas showing current auto-arrangement with labels
+        * Show instruction: "Cameras arranged automatically. Press 'c' to confirm, 'e' to edit"
+        * If 'e' pressed: show prompt asking user to input custom arrangement
+        * Input format: "camera_id:row,col camera_id:row,col" (e.g., "0:0,1 1:0,0 2:1,0")
+        * Validate input and update arrangement
+        * Display updated arrangement and confirm
+        * Return: dict mapping camera_id -> (grid_row, grid_col)
+
+2. Modify calibrate_cameras() function:
+   - After point selection for all cameras
+   - Before computing homographies
+   - Create GridArrangementUI instance
+   - Call arrange_cameras_simple() to get camera positions
+   - Use returned positions instead of auto-calculated ones
+   - Compute destination points based on user-specified grid cells
+   - Rest of the flow remains the same
+
+3. Update tests/test_calibration.py:
+   - Add test for GridArrangementUI
+   - Test default arrangement display
+   - Test manual arrangement (if user chooses to edit)
+   - Verify grid cell assignments are correct
+
+IMPLEMENTATION NOTES:
+- Keep it simple: text-based input is easier than drag-and-drop
+- Default arrangement should be shown visually (draw grid with camera labels)
+- User can accept default or customize
+- Validation: ensure each grid cell has at most one camera
+- Validation: ensure all camera IDs are assigned
+- Draw camera thumbnails (resized) in their grid cells for visual reference
+
+EXPECTED WORKFLOW:
+1. User selects floor points for each camera (existing behavior)
+2. NEW: System shows grid layout with camera positions
+3. NEW: User confirms or customizes arrangement
+4. System computes homographies based on final arrangement (existing code)
+
+VISUAL LAYOUT EXAMPLE:
+```
+Canvas with 2x2 grid for 3 cameras:
++------------------------+------------------------+
+|      Camera 0          |      Camera 1          |
+|   [thumbnail]          |   [thumbnail]          |
+|                        |                        |
++------------------------+------------------------+
+|      Camera 2          |        Empty           |
+|   [thumbnail]          |                        |
+|                        |                        |
++------------------------+------------------------+
+
+Instructions: Press 'c' to confirm, 'e' to edit positions
+```
+
+IMPORTANT NOTES:
+- Don't break existing functionality
+- If user just presses 'c' without editing, use auto-arrangement
+- This is an enhancement, not a replacement
+- Keep the implementation simple - focus on functionality over fancy UI
+
+After implementation, show me the GridArrangementUI class and updated calibrate_cameras function.
+
+Then I will test the interactive arrangement workflow.
+
+Please implement Phase 2B now.
+```
+
+---
+
 ## PHASE 3 PROMPT: Detection Module
 
 ```
