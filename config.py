@@ -7,10 +7,8 @@ YOLO detection, and visualization settings.
 
 # Video source configuration
 VIDEO_FILES = [
-    "./media/sample1.mp4",
-    "./media/sample2.mp4",
-    "./media/sample3.mp4",
-    "./media/sample4.mp4"
+    "/home/ezio/Documents/work/vis-tracking/videos/camera1.mp4",
+    "/home/ezio/Documents/work/vis-tracking/videos/camera2.mp4",
 ]
 
 # Detection parameters
